@@ -134,6 +134,20 @@
                 <!-- Hls.js Adaptive Video Component -->
                 <div class="bg-black border border-slate-800 rounded-2xl overflow-hidden shadow-2xl relative aspect-video flex flex-col justify-between group">
                     
+                    <!-- Keyboard Controls Helper Tooltip (Visible on Hover) -->
+                    <div class="absolute top-4 left-4 z-20 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none bg-slate-950/90 backdrop-blur-md px-3.5 py-2 rounded-xl border border-slate-800 shadow-xl text-xs text-textGray flex items-center space-x-2">
+                        <i data-lucide="keyboard" class="w-4 h-4 text-accentCyan"></i>
+                        <span class="font-medium mr-1 text-textWhite">Shortcuts:</span>
+                        <kbd class="px-1.5 py-0.5 bg-slate-800 text-textWhite rounded border border-slate-700 text-[10px] font-mono shadow-sm">Space</kbd>
+                        <span>Play/Pause</span>
+                        <span class="text-slate-700">•</span>
+                        <kbd class="px-1.5 py-0.5 bg-slate-800 text-textWhite rounded border border-slate-700 text-[10px] font-mono shadow-sm">M</kbd>
+                        <span>Mute</span>
+                        <span class="text-slate-700">•</span>
+                        <kbd class="px-1.5 py-0.5 bg-slate-800 text-textWhite rounded border border-slate-700 text-[10px] font-mono shadow-sm">F</kbd>
+                        <span>Fullscreen</span>
+                    </div>
+
                     <!-- HTML5 Video Component -->
                     <div class="absolute inset-0 z-0 bg-slate-950 flex items-center justify-center">
                         <video id="video-canvas" class="w-full h-full object-contain" playsinline preload="auto"></video>
@@ -171,8 +185,8 @@
                         <div class="flex items-center space-x-4">
                             <!-- Volume slider -->
                             <div class="flex items-center space-x-2 bg-slate-950/70 py-1.5 px-3 rounded-lg border border-slate-800">
-                                <i data-lucide="volume-2" class="w-4 h-4 text-accentCyan"></i>
-                                <input oninput="adjustVolume(this.value)" type="range" min="0" max="1" step="0.1" value="1" class="w-16 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-accentCyan">
+                                <i id="volume-icon" data-lucide="volume-2" class="w-4 h-4 text-accentCyan"></i>
+                                <input id="volume-slider" oninput="adjustVolume(this.value)" type="range" min="0" max="1" step="0.05" value="1" class="w-16 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-accentCyan">
                             </div>
 
                             <button onclick="toggleFullscreen()" class="p-2 bg-slate-950/70 hover:bg-slate-800 rounded-lg border border-slate-800 text-textWhite transition-colors">
@@ -744,22 +758,77 @@
             lucide.createIcons();
         }
 
+        // Update volume state and UI
+        function updateVolumeUI() {
+            const volIcon = document.getElementById('volume-icon');
+            const volSlider = document.getElementById('volume-slider');
+            if (!volIcon || !volSlider) return;
+
+            if (video.muted || video.volume === 0) {
+                volIcon.setAttribute('data-lucide', 'volume-x');
+                volSlider.value = 0;
+            } else if (video.volume < 0.5) {
+                volIcon.setAttribute('data-lucide', 'volume-1');
+                volSlider.value = video.volume;
+            } else {
+                volIcon.setAttribute('data-lucide', 'volume-2');
+                volSlider.value = video.volume;
+            }
+            lucide.createIcons();
+        }
+
         // Adjust Volume
         function adjustVolume(vol) {
             video.volume = parseFloat(vol);
-            appendConsoleLog(`Control Action: Adjust volume parameter to ${Math.round(vol * 100)}%`);
+            if (video.volume > 0) {
+                video.muted = false;
+            }
+            updateVolumeUI();
+            appendConsoleLog(`Control Action: Adjust volume parameter to ${Math.round(video.volume * 100)}%`);
         }
 
         // Fullscreen Manager
         function toggleFullscreen() {
-            if (video.requestFullscreen) {
-                video.requestFullscreen();
-            } else if (video.webkitRequestFullscreen) {
-                video.webkitRequestFullscreen(); // Safari
-            } else if (video.msRequestFullscreen) {
-                video.msRequestFullscreen(); // IE11
+            if (document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement) {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                } else if (document.webkitExitFullscreen) {
+                    document.webkitExitFullscreen();
+                }
+            } else {
+                if (video.requestFullscreen) {
+                    video.requestFullscreen();
+                } else if (video.webkitRequestFullscreen) {
+                    video.webkitRequestFullscreen(); // Safari
+                } else if (video.msRequestFullscreen) {
+                    video.msRequestFullscreen(); // IE11
+                }
             }
         }
+
+        // Global Keyboard Event Listeners for Media Control
+        window.addEventListener('keydown', (e) => {
+            // Ignore keypresses inside inputs or textareas to prevent interfering
+            if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
+                return;
+            }
+
+            const key = e.key.toLowerCase();
+            if (e.key === ' ' || key === 'spacebar') {
+                e.preventDefault();
+                toggleVideoPlayback();
+                appendConsoleLog(`Keyboard Shortcut: [Space] - Play/Pause toggled`);
+            } else if (key === 'm') {
+                e.preventDefault();
+                video.muted = !video.muted;
+                updateVolumeUI();
+                appendConsoleLog(`Keyboard Shortcut: [M] - Toggle Mute to ${video.muted ? 'MUTED' : 'UNMUTED'}`);
+            } else if (key === 'f') {
+                e.preventDefault();
+                toggleFullscreen();
+                appendConsoleLog(`Keyboard Shortcut: [F] - Toggle Fullscreen`);
+            }
+        });
 
         // Save & Sync custom playlist mock URL inside Administrator Console
         function saveAndSyncM3uLink() {

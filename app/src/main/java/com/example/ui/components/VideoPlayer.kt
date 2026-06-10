@@ -174,6 +174,7 @@ private fun getHlsJsHtml(url: String): String {
                     height: 100%;
                     background-color: #000;
                     overflow: hidden;
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
                 }
                 video {
                     width: 100%;
@@ -181,11 +182,54 @@ private fun getHlsJsHtml(url: String): String {
                     border: none;
                     background-color: #000;
                 }
+                /* Floating Tooltip styling */
+                .tooltip {
+                    position: absolute;
+                    top: 12px;
+                    left: 12px;
+                    z-index: 100;
+                    opacity: 0;
+                    pointer-events: none;
+                    background: rgba(15, 23, 42, 0.9);
+                    border: 1px solid rgba(148, 163, 184, 0.15);
+                    border-radius: 8px;
+                    padding: 6px 12px;
+                    color: #94a3b8;
+                    font-size: 11px;
+                    display: flex;
+                    align-items: center;
+                    gap: 6px;
+                    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -4px rgba(0, 0, 0, 0.3);
+                    transition: opacity 0.3s ease;
+                }
+                body:hover .tooltip {
+                    opacity: 1;
+                }
+                .key-badge {
+                    background: #1e293b;
+                    border: 1px solid #475569;
+                    border-radius: 4px;
+                    padding: 1px 5px;
+                    color: #f8fafc;
+                    font-family: monospace;
+                    font-size: 10.5px;
+                    font-weight: bold;
+                    box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05);
+                }
             </style>
             <!-- Load stable Hls.js CDN -->
             <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.8/dist/hls.min.js"></script>
         </head>
         <body>
+            <!-- Help Tooltip Overlay on Hover -->
+            <div class="tooltip">
+                <span style="color: #38bdf8; font-weight: bold; margin-right: 4px;">Shortcuts:</span>
+                <span class="key-badge">Space</span> Play/Pause
+                <span style="color: #334155;">•</span>
+                <span class="key-badge">M</span> Mute
+                <span style="color: #334155;">•</span>
+                <span class="key-badge">F</span> Fullscreen
+            </div>
             <video id="video" playsinline controls></video>
             <script>
                 var video = document.getElementById('video');
@@ -311,6 +355,40 @@ private fun getHlsJsHtml(url: String): String {
                         notifyState("ERROR", "No network connection or stream offline");
                     }
                 }
+
+                // Global keyboard event listeners
+                window.addEventListener('keydown', function(e) {
+                    var key = e.key.toLowerCase();
+                    if (e.key === ' ' || key === 'spacebar') {
+                        e.preventDefault();
+                        if (video.paused) {
+                            video.play().catch(function(){});
+                        } else {
+                            video.pause();
+                        }
+                        logToAndroid("Global Keyboard Action: [Space] Play/Pause toggled");
+                    } else if (key === 'm') {
+                        e.preventDefault();
+                        video.muted = !video.muted;
+                        logToAndroid("Global Keyboard Action: [M] Toggle Mute (" + (video.muted ? "Muted" : "Unmuted") + ")");
+                    } else if (key === 'f') {
+                        e.preventDefault();
+                        if (document.fullscreenElement || document.webkitFullscreenElement) {
+                            if (document.exitFullscreen) {
+                                document.exitFullscreen();
+                            } else if (document.webkitExitFullscreen) {
+                                document.webkitExitFullscreen();
+                            }
+                        } else {
+                            if (video.requestFullscreen) {
+                                video.requestFullscreen();
+                            } else if (video.webkitRequestFullscreen) {
+                                video.webkitRequestFullscreen();
+                            }
+                        }
+                        logToAndroid("Global Keyboard Action: [F] Toggle Fullscreen");
+                    }
+                });
 
                 function play() {
                     video.play().catch(function(){});
