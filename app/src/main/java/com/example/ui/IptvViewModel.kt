@@ -14,6 +14,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+enum class PlaybackEngine(val label: String) {
+    EXOPLAYER("ExoPlayer Native"),
+    HLS_JS("Hls.js Web Player")
+}
+
 data class IptvUiState(
     val isLoading: Boolean = false,
     val channels: List<ChannelEntity> = emptyList(),
@@ -29,7 +34,8 @@ data class IptvUiState(
     val playlistUrl: String = "",
     val lastRefreshTime: Long = 0L,
     val telemetryLogs: List<String> = emptyList(),
-    val healingProgress: String? = null
+    val healingProgress: String? = null,
+    val playbackEngine: PlaybackEngine = PlaybackEngine.HLS_JS
 )
 
 class IptvViewModel(application: Application) : AndroidViewModel(application) {
@@ -124,11 +130,31 @@ class IptvViewModel(application: Application) : AndroidViewModel(application) {
 
     fun getPlayer() = playerEngine?.getPlayer()
 
+    fun setPlaybackEngine(engine: PlaybackEngine) {
+        _uiState.update { it.copy(playbackEngine = engine, errorMessage = null, healingProgress = null) }
+        addTelemetryLog("Switched primary playback engine to: ${engine.label}")
+        if (engine == PlaybackEngine.HLS_JS) {
+            // Stop and release native hardware demuxers so ExoPlayer does not conflict with WebView codecs
+            playerEngine?.getPlayer()?.stop()
+            addTelemetryLog("ExoPlayer background decoding paused.")
+        } else {
+            // Re-trigger playback inside native ExoPlayer
+            _uiState.value.selectedChannel?.let { channel ->
+                playerEngine?.playStream(channel.streamUrl)
+            }
+        }
+    }
+
     fun selectChannel(channel: ChannelEntity) {
-        _uiState.update { it.copy(selectedChannel = channel, errorMessage = null, healingProgress = null) }
+        _uiState.update { it.copy(selectedChannel = channel, errorMessage = null, healingProgress = null, isPlaying = true) }
         addTelemetryLog("User switched channel to: ${channel.name}")
         
-        playerEngine?.playStream(channel.streamUrl)
+        if (_uiState.value.playbackEngine == PlaybackEngine.EXOPLAYER) {
+            playerEngine?.playStream(channel.streamUrl)
+        } else {
+            // WebView Hls.js runs independently. Pause ExoPlayer.
+            playerEngine?.getPlayer()?.stop()
+        }
         
         // Save to recently watched
         viewModelScope.launch {
@@ -137,8 +163,14 @@ class IptvViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun togglePlayPause() {
-        playerEngine?.togglePlayPause()
-        _uiState.update { it.copy(isPlaying = playerEngine?.getPlayer()?.isPlaying == true) }
+        if (_uiState.value.playbackEngine == PlaybackEngine.EXOPLAYER) {
+            playerEngine?.togglePlayPause()
+            _uiState.update { it.copy(isPlaying = playerEngine?.getPlayer()?.isPlaying == true) }
+        } else {
+            val nextPlayingState = !_uiState.value.isPlaying
+            _uiState.update { it.copy(isPlaying = nextPlayingState) }
+            addTelemetryLog("User Action: " + if (nextPlayingState) "PLAY" else "PAUSE")
+        }
     }
 
     fun toggleFavorite(channel: ChannelEntity) {
@@ -217,7 +249,15 @@ class IptvViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(errorMessage = null) }
     }
 
-    private fun addTelemetryLog(log: String) {
+    fun setHealingProgress(message: String?) {
+        _uiState.update { it.copy(healingProgress = message) }
+    }
+
+    fun logFromWebView(log: String) {
+        addTelemetryLog("[Hls.js WebEngine] $log")
+    }
+
+    fun addTelemetryLog(log: String) {
         val currentLogs = _uiState.value.telemetryLogs.toMutableList()
         val timestamp = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
         currentLogs.add(0, "[$timestamp] $log") // Keep latests at start

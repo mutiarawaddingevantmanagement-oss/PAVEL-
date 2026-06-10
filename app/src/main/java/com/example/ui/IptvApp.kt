@@ -78,8 +78,14 @@ fun IptvApp(
             // Premium Immersive Fullscreen playback mode in Landscape orientation
             Box(modifier = Modifier.fillMaxSize()) {
                 VideoPlayer(
+                    streamUrl = state.selectedChannel?.streamUrl,
                     player = viewModel.getPlayer(),
                     resizeMode = resizeMode,
+                    playbackEngine = state.playbackEngine,
+                    isPlaying = state.isPlaying,
+                    onLog = { viewModel.logFromWebView(it) },
+                    onHealing = { viewModel.setHealingProgress(it) },
+                    onError = { viewModel.addTelemetryLog("[Hls.js Error] $it") },
                     modifier = Modifier.fillMaxSize()
                 )
 
@@ -311,8 +317,14 @@ fun LiveTvView(
             ) {
                 Box(modifier = Modifier.fillMaxSize()) {
                     VideoPlayer(
+                        streamUrl = state.selectedChannel?.streamUrl,
                         player = viewModel.getPlayer(),
                         resizeMode = resizeMode,
+                        playbackEngine = state.playbackEngine,
+                        isPlaying = state.isPlaying,
+                        onLog = { viewModel.logFromWebView(it) },
+                        onHealing = { viewModel.setHealingProgress(it) },
+                        onError = { viewModel.addTelemetryLog("[Hls.js Error] $it") },
                         modifier = Modifier.fillMaxSize()
                     )
 
@@ -455,6 +467,61 @@ fun LiveTvView(
                             color = TextGray,
                             style = MaterialTheme.typography.labelSmall
                         )
+                    }
+                }
+            }
+        }
+
+        // Playback Engine selector row
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            shape = RoundedCornerShape(8.dp),
+            colors = CardDefaults.cardColors(containerColor = DeepBlueSurface)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = "Engine Select",
+                        tint = AccentCyan,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Decoder Engine:",
+                        color = TextWhite,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    PlaybackEngine.values().forEach { engine ->
+                        val isSelected = state.playbackEngine == engine
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(if (isSelected) AccentCyan else Color(0xFF0F172A))
+                                .clickable { viewModel.setPlaybackEngine(engine) }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = engine.label,
+                                color = if (isSelected) DeepBlueBg else TextWhite,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
             }
