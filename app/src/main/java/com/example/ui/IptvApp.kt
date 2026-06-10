@@ -20,11 +20,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.example.data.db.ChannelEntity
 import com.example.ui.components.VideoPlayer
+import com.example.ui.components.CategorySidebar
 import com.example.ui.theme.*
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -34,7 +36,7 @@ import androidx.media3.ui.AspectRatioFrameLayout
 sealed class Screen(val title: String) {
     object LiveTv : Screen("Live TV")
     object Favorites : Screen("Favorites")
-    object Settings : Screen("Admin Settings")
+    object Settings : Screen("Admin Panel")
     object Telemetry : Screen("Logs & Diagnostics")
 }
 
@@ -46,6 +48,7 @@ fun IptvApp(
 ) {
     val state by viewModel.uiState.collectAsState()
     var currentScreen by remember { mutableStateOf<Screen>(Screen.LiveTv) }
+    var isSidebarOpen by remember { mutableStateOf(true) }
     var resizeMode by remember { mutableStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
 
     // Init ExoPlayer
@@ -164,6 +167,20 @@ fun IptvApp(
                 containerColor = DeepBlueBg,
                 topBar = {
                     TopAppBar(
+                        navigationIcon = {
+                            if (currentScreen == Screen.LiveTv) {
+                                IconButton(
+                                    onClick = { isSidebarOpen = !isSidebarOpen },
+                                    modifier = Modifier.testTag("sidebar_toggle_button")
+                                ) {
+                                    Icon(
+                                        imageVector = if (isSidebarOpen) Icons.Default.MenuOpen else Icons.Default.Menu,
+                                        contentDescription = "Toggle Sidebar",
+                                        tint = AccentCyan
+                                    )
+                                }
+                            }
+                        },
                         title = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(
@@ -217,7 +234,7 @@ fun IptvApp(
                             Screen.LiveTv to Icons.Default.Tv,
                             Screen.Favorites to Icons.Default.Favorite,
                             Screen.Telemetry to Icons.Default.Info,
-                            Screen.Settings to Icons.Default.Settings
+                            Screen.Settings to Icons.Default.Security
                         )
                         items.forEach { (screen, icon) ->
                             NavigationBarItem(
@@ -243,7 +260,7 @@ fun IptvApp(
                         .padding(innerPadding)
                 ) {
                     when (currentScreen) {
-                        is Screen.LiveTv -> LiveTvView(viewModel, state, resizeMode) { resizeMode = it }
+                        is Screen.LiveTv -> LiveTvView(viewModel, state, resizeMode, isSidebarOpen) { resizeMode = it }
                         is Screen.Favorites -> FavoritesView(viewModel, state)
                         is Screen.Telemetry -> TelemetryView(state)
                         is Screen.Settings -> SettingsView(viewModel, state)
@@ -259,9 +276,29 @@ fun LiveTvView(
     viewModel: IptvViewModel,
     state: IptvUiState,
     resizeMode: Int,
+    isSidebarOpen: Boolean,
     onResizeModeChange: (Int) -> Unit
 ) {
-    Column(modifier = Modifier.fillMaxSize()) {
+    Row(modifier = Modifier.fillMaxSize()) {
+        AnimatedVisibility(
+            visible = isSidebarOpen,
+            enter = slideInHorizontally(initialOffsetX = { -it }) + fadeIn(),
+            exit = slideOutHorizontally(targetOffsetX = { -it }) + fadeOut()
+        ) {
+            CategorySidebar(
+                categories = state.categories,
+                selectedCategory = state.selectedCategory,
+                channels = state.channels,
+                selectedChannel = state.selectedChannel,
+                onCategorySelect = { viewModel.selectCategory(it) },
+                onChannelSelect = { viewModel.selectChannel(it) },
+                modifier = Modifier
+                    .width(280.dp)
+                    .fillMaxHeight()
+            )
+        }
+
+        Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
         // Active Stream Player Panel (Adaptive top area)
         if (state.selectedChannel != null) {
             Card(
@@ -524,6 +561,7 @@ fun LiveTvView(
                 }
             }
         }
+        }
     }
 }
 
@@ -747,172 +785,110 @@ fun SettingsView(
     viewModel: IptvViewModel,
     state: IptvUiState
 ) {
-    var rawPlaylistUrl by remember { mutableStateOf(state.playlistUrl) }
-    var configJsonString by remember { mutableStateOf("") }
-
-    // Sync input field value to state URL updates
-    LaunchedEffect(state.playlistUrl) {
-        rawPlaylistUrl = state.playlistUrl
-    }
-
-    LazyColumn(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .padding(24.dp),
+        contentAlignment = Alignment.Center
     ) {
-        item {
-            Text(
-                "Source Configuration",
-                color = TextWhite,
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold
-            )
-            Text(
-                "Configure or refresh your customizable M3U list stream link",
-                color = TextGray,
-                style = MaterialTheme.typography.bodySmall
-            )
-        }
-
-        item {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = DeepBlueSurface),
-                modifier = Modifier.fillMaxWidth()
+        Card(
+            colors = CardDefaults.cardColors(containerColor = DeepBlueSurface),
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 500.dp)
+                .border(1.dp, Color(0xFF1E293B), RoundedCornerShape(16.dp))
+        ) {
+            Column(
+                modifier = Modifier.padding(28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        "M3U/M3U8 Playlist URL:",
-                        color = TextWhite,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = rawPlaylistUrl,
-                        onValueChange = { rawPlaylistUrl = it },
-                        textStyle = androidx.compose.ui.text.TextStyle(color = TextWhite),
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = AccentCyan,
-                            unfocusedBorderColor = Color.Transparent,
-                            focusedContainerColor = DeepBlueBg,
-                            unfocusedContainerColor = DeepBlueBg
-                        )
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Button(
-                        onClick = {
-                            viewModel.updatePlaylistUrl(rawPlaylistUrl)
-                            viewModel.triggerPlaylistRefresh()
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = AccentCyan, contentColor = DeepBlueBg)
-                    ) {
-                        Icon(Icons.Default.Refresh, contentDescription = null, tint = DeepBlueBg)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Save & Sync Streams", fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
-
-        item {
-            Text(
-                "Backup & Restore Properties",
-                color = TextWhite,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Card(
-                colors = CardDefaults.cardColors(containerColor = DeepBlueSurface),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    OutlinedTextField(
-                        value = configJsonString,
-                        onValueChange = { configJsonString = it },
-                        placeholder = { Text("Paste configuration backups JSON parameters here...", color = TextGray) },
-                        maxLines = 6,
-                        textStyle = androidx.compose.ui.text.TextStyle(color = TextWhite),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(100.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = AccentCyan,
-                            unfocusedBorderColor = Color.Transparent,
-                            focusedContainerColor = DeepBlueBg,
-                            unfocusedContainerColor = DeepBlueBg
-                        )
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Button(
-                            onClick = {
-                                val currentBackup = viewModel.exportSettings()
-                                configJsonString = if (currentBackup.isNotBlank() && currentBackup != "{}") {
-                                    currentBackup
-                                } else {
-                                    "{\"playlist_url\":\"${state.playlistUrl}\"}"
-                                }
-                                viewModel.showToast("Backup generated and loaded to field!")
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue, contentColor = TextWhite),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Default.Upload, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Generate Backup")
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Button(
-                            onClick = {
-                                if (configJsonString.isNotBlank()) {
-                                    viewModel.importSettings(configJsonString)
-                                } else {
-                                    viewModel.showToast("Please paste config backups first.")
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = AccentCyan, contentColor = DeepBlueBg),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp), tint = DeepBlueBg)
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Restore Backups")
-                        }
-                    }
-                }
-            }
-        }
-
-        item {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = DeepBlueSurface),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                // Large styled locker/security key icon
+                Box(
+                    modifier = Modifier
+                        .size(80.dp)
+                        .clip(RoundedCornerShape(40.dp))
+                        .background(Color.Red.copy(alpha = 0.1f)),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        "PAVEL IPTV v1.0.0 Stable Build",
-                        color = AccentCyan,
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold
+                    Icon(
+                        imageVector = Icons.Default.Security,
+                        contentDescription = "Access Blocked",
+                        tint = Color.Red,
+                        modifier = Modifier.size(44.dp)
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        "Optimized with Multi-Retry Failover Connection Systems and Intelligent Local M3U Parser caching.",
-                        color = TextGray,
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)
-                    )
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Text(
+                    text = "Administrative Access Blocked",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = TextWhite,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = "Admin Panel is available only on Desktop or Laptop.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = AccentCyan,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                HorizontalDivider(color = Color(0xFF1E293B), thickness = 1.dp)
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    text = "Security Isolation Enforcement",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = TextWhite,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = "The Pavel IPTV ecosystem separates consumer playback interfaces from management tools. Platform environments such as Android Mobile, Android TV, Google TV, Fire TV, and iOS apps are restricted from direct administrative functions (such as custom M3U configuration, user profile tables, analytics tracking, and credential back-ups). Please log in to the Desktop Console Web portal to manage channels, playlists, or database configurations.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextGray,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+                
+                Spacer(modifier = Modifier.height(20.dp))
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    Badge(containerColor = Color(0xFF0F172A), contentColor = AccentCyan, text = "JWT SECURE")
+                    Badge(containerColor = Color(0xFF0F172A), contentColor = AccentCyan, text = "IP RESTRICTED")
+                    Badge(containerColor = Color(0xFF0F172A), contentColor = AccentCyan, text = "MFA LOGGED")
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun Badge(containerColor: Color, contentColor: Color, text: String) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(containerColor)
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            color = contentColor,
+            fontWeight = FontWeight.Bold
+        )
     }
 }
