@@ -461,8 +461,75 @@
         // Init Lucide Icons
         lucide.createIcons();
 
-        // Channels Database
-        const defaultChannelsList = [
+        // IndexedDB Manager
+        const DB_NAME = 'PavelIptvDB';
+        const DB_VERSION = 1;
+        const STORE_NAME = 'channels_store';
+
+        function initDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(DB_NAME, DB_VERSION);
+                
+                request.onerror = (event) => {
+                    appendAdminLog(`IndexedDB opening error: ${event.target.error}`);
+                    reject(event.target.error);
+                };
+
+                request.onsuccess = (event) => {
+                    const db = event.target.result;
+                    resolve(db);
+                };
+
+                request.onupgradeneeded = (event) => {
+                    const db = event.target.result;
+                    if (!db.objectStoreNames.contains(STORE_NAME)) {
+                        db.createObjectStore(STORE_NAME);
+                    }
+                };
+            });
+        }
+
+        function getDBValue(key, defaultValue = null) {
+            return initDB().then(db => {
+                return new Promise((resolve, reject) => {
+                    const transaction = db.transaction([STORE_NAME], 'readonly');
+                    const store = transaction.objectStore(STORE_NAME);
+                    const request = store.get(key);
+
+                    request.onerror = (event) => {
+                        reject(event.target.error);
+                    };
+
+                    request.onsuccess = (event) => {
+                        resolve(request.result !== undefined ? request.result : defaultValue);
+                    };
+                });
+            }).catch(err => {
+                console.error("error reading from DB", err);
+                return defaultValue;
+            });
+        }
+
+        function setDBValue(key, value) {
+            return initDB().then(db => {
+                return new Promise((resolve, reject) => {
+                    const transaction = db.transaction([STORE_NAME], 'readwrite');
+                    const store = transaction.objectStore(STORE_NAME);
+                    const request = store.put(value, key);
+
+                    request.onerror = (event) => {
+                        reject(event.target.error);
+                    };
+
+                    request.onsuccess = (event) => {
+                        resolve();
+                    };
+                });
+            });
+        }
+
+        // Hardcoded backup fallback list
+        const hardcodedDefaultChannels = [
             { id: "bloomberg", name: "Bloomberg TV US", group: "News", url: "https://live-bloomberg.gcdn.co/bloomberg/us/index.m3u8", logo: "https://upload.wikimedia.org/wikipedia/commons/d/d4/Bloomberg_logo.svg", epg: ["Live Market Updates", "Bloomberg Technology", "Bloomberg Surveillance"] },
             { id: "nasa", name: "NASA TV Live", group: "Science", url: "https://ntv1.nasatv.net/hls/ntv_hls.m3u8", logo: "https://upload.wikimedia.org/wikipedia/commons/e/e5/NASA_logo.svg", epg: ["Space Station Live", "Artemis Program Progress", "Deep Cosmic Exploration Documentary"] },
             { id: "skynews", name: "Sky News UK", group: "News", url: "https://skynews-live-md.b-cdn.net/hls/news.m3u8", logo: "https://upload.wikimedia.org/wikipedia/commons/a/ad/Sky_News_2016_logo.svg", epg: ["Sky News Tonight", "UK Politics Digest", "Global Press Show Review"] },
@@ -471,6 +538,39 @@
             { id: "dw", name: "Deutsche Welle English", group: "News", url: "https://dwstream4-lh.akamaihd.net/i/dwstream4_live@121342/master.m3u8", logo: "https://upload.wikimedia.org/wikipedia/commons/5/5b/Deutsche_Welle_logo_2012.svg", epg: ["DW News Center Live", "Global 3000 Eco Magazine", "Documentary Digest Hour"] },
             { id: "france24", name: "France 24 English", group: "News", url: "https://static.france24.com/live/F24_EN_LO_HLS/live_tv.m3u8", logo: "https://upload.wikimedia.org/wikipedia/commons/e/eb/France_24_logo.svg", epg: ["F24 Live Review", "Eye on Tech Innovations", "Focus France In-depth Analysis"] }
         ];
+
+        // Load custom settings and playlists if present
+        let activePlaylistUrl = localStorage.getItem('pavel_playlist_url') || 'https://iptv-org.github.io/iptv/countries/us.m3u';
+        let defaultChannelsList = [...hardcodedDefaultChannels];
+
+        async function loadStoredChannels() {
+            try {
+                const storedValue = await getDBValue('pavel_channels_list');
+                if (storedValue && Array.isArray(storedValue) && storedValue.length > 0) {
+                    defaultChannelsList = storedValue;
+                    appendAdminLog(`IndexedDB Success: Loaded ${defaultChannelsList.length} channels from local persistent storage.`);
+                } else {
+                    // Check if old localStorage contains data we can migrate
+                    const legacyDataStr = localStorage.getItem('pavel_channels_list');
+                    if (legacyDataStr) {
+                        try {
+                            const parsed = JSON.parse(legacyDataStr);
+                            if (parsed && Array.isArray(parsed) && parsed.length > 0) {
+                                defaultChannelsList = parsed;
+                                await setDBValue('pavel_channels_list', defaultChannelsList);
+                                appendAdminLog(`IndexedDB Migration: Imported ${defaultChannelsList.length} channels from legacy localStorage.`);
+                                // Remove to free up 5MB space
+                                localStorage.removeItem('pavel_channels_list');
+                            }
+                        } catch (e) {
+                            appendAdminLog(`Legacy storage migration failed: ${e.message}`);
+                        }
+                    }
+                }
+            } catch (err) {
+                appendAdminLog(`Warning loading channels from IndexedDB: ${err.message}. Using default channel list.`);
+            }
+        }
 
         let activeChannel = null;
         let hlsInstance = null;
@@ -488,32 +588,65 @@
         // Log Console helper
         function appendConsoleLog(msg) {
             const consoleBox = document.getElementById('hls-web-logs');
-            const timestamp = new Date().toLocaleTimeString();
-            consoleBox.innerHTML += `\n[${timestamp}] ${msg}`;
-            consoleBox.scrollTop = consoleBox.scrollHeight;
+            if (consoleBox) {
+                const timestamp = new Date().toLocaleTimeString();
+                consoleBox.innerHTML += `\n[${timestamp}] ${msg}`;
+                consoleBox.scrollTop = consoleBox.scrollHeight;
+            }
         }
 
         function appendAdminLog(msg) {
             const consoleBox = document.getElementById('admin-sc-logs');
-            const timestamp = new Date().toLocaleTimeString();
-            consoleBox.innerHTML += `\n<div>[${timestamp}] ${msg}</div>`;
-            consoleBox.scrollTop = consoleBox.scrollHeight;
+            if (consoleBox) {
+                const timestamp = new Date().toLocaleTimeString();
+                consoleBox.innerHTML += `\n<div>[${timestamp}] ${msg}</div>`;
+                consoleBox.scrollTop = consoleBox.scrollHeight;
+            }
+        }
+
+        // Render Category Tabs dynamically based on channels list
+        function renderCategoryTabs() {
+            const container = document.getElementById('category-filter-container');
+            if (!container) return;
+
+            const categories = new Set();
+            defaultChannelsList.forEach(ch => {
+                if (ch.group) {
+                    categories.add(ch.group);
+                }
+            });
+
+            let html = `<button onclick="filterCategory('All')" class="category-btn px-3 py-1 rounded-full text-xs font-semibold ${selectedCategory === 'All' ? 'bg-accentCyan text-deepBlueBg' : 'bg-slate-800 text-textGray hover:text-textWhite'} transition-all" data-category="All">All</button>`;
+            
+            categories.forEach(cat => {
+                const isSelected = selectedCategory === cat;
+                html += `<button onclick="filterCategory('${cat}')" class="category-btn px-3 py-1 rounded-full text-xs font-semibold ${isSelected ? 'bg-accentCyan text-deepBlueBg' : 'bg-slate-800 text-textGray hover:text-textWhite'} transition-all" data-category="${cat}">${cat}</button>`;
+            });
+
+            const isFavSelected = selectedCategory === 'Favorites';
+            html += `<button onclick="filterCategory('Favorites')" class="category-btn px-3 py-1 rounded-full text-xs font-semibold ${isFavSelected ? 'bg-accentCyan text-deepBlueBg' : 'bg-slate-800 text-yellow-500 hover:text-yellow-400'} transition-all" data-category="Favorites">⭐️ Favorites</button>`;
+
+            container.innerHTML = html;
         }
 
         // Initialize lists
         function renderChannelsList() {
             const searchVal = document.getElementById('channel-search').value.toLowerCase();
             const channelsContainer = document.getElementById('channels-list');
+            if (!channelsContainer) return;
             channelsContainer.innerHTML = '';
 
             let filtered = defaultChannelsList.filter(ch => {
-                const matchesSearch = ch.name.toLowerCase().includes(searchVal) || ch.group.toLowerCase().includes(searchVal);
+                const matchesSearch = ch.name.toLowerCase().includes(searchVal) || (ch.group && ch.group.toLowerCase().includes(searchVal));
                 if (selectedCategory === "All") return matchesSearch;
                 if (selectedCategory === "Favorites") return favoritesList.includes(ch.id) && matchesSearch;
                 return ch.group === selectedCategory && matchesSearch;
             });
 
-            document.getElementById('active-total-channels').innerText = `${filtered.length} Channels Loaded`;
+            const totalLabel = document.getElementById('active-total-channels');
+            if (totalLabel) {
+                totalLabel.innerText = `${filtered.length} Channels Loaded`;
+            }
 
             if (filtered.length === 0) {
                 channelsContainer.innerHTML = `<div class="text-center py-12 text-slate-500 font-semibold text-sm">No channels match current selections.</div>`;
@@ -531,10 +664,10 @@
 
                 item.innerHTML = `
                     <div onclick="selectAndPlayStream('${ch.id}')" class="flex items-center space-x-3 flex-grow">
-                        <img src="${ch.logo}" alt="${ch.name}" class="w-10 h-10 object-contain p-1 bg-white rounded-lg border border-slate-700">
+                        <img src="${ch.logo}" alt="${ch.name}" class="w-10 h-10 object-contain p-1 bg-white rounded-lg border border-slate-700" onerror="this.src='https://upload.wikimedia.org/wikipedia/commons/e/e5/NASA_logo.svg'">
                         <div class="text-left">
                             <h4 class="text-sm font-semibold text-textWhite leading-snug">${ch.name}</h4>
-                            <span class="text-[10px] text-textGray uppercase">${ch.group}</span>
+                            <span class="text-[10px] text-textGray uppercase">${ch.group || 'General'}</span>
                         </div>
                     </div>
                     <button onclick="toggleFav(event, '${ch.id}')" class="p-1.5 rounded-lg border transition-all ${
@@ -830,11 +963,131 @@
             }
         });
 
-        // Save & Sync custom playlist mock URL inside Administrator Console
+        // Parse raw EXTM3U playlist format to JavaScript array list
+        function parseM3uText(text) {
+            const lines = text.split('\n');
+            const channels = [];
+            let currentChannel = null;
+
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+                if (!line) continue;
+
+                if (line.startsWith('#EXTINF:')) {
+                    currentChannel = {};
+                    
+                    // ID
+                    const idMatch = line.match(/tvg-id="([^"]+)"/i);
+                    currentChannel.id = idMatch ? idMatch[1] : `ch_${Math.random().toString(36).substr(2, 9)}`;
+
+                    // Logo
+                    const logoMatch = line.match(/tvg-logo="([^"]+)"/i);
+                    currentChannel.logo = logoMatch ? logoMatch[1] : "https://upload.wikimedia.org/wikipedia/commons/e/e5/NASA_logo.svg";
+
+                    // Group / Category
+                    const groupMatch = line.match(/group-title="([^"]+)"/i);
+                    currentChannel.group = groupMatch ? groupMatch[1] : "General";
+
+                    // Name (last comma parameter)
+                    const commaIndex = line.lastIndexOf(',');
+                    if (commaIndex !== -1) {
+                        currentChannel.name = line.substring(commaIndex + 1).trim();
+                    } else {
+                        currentChannel.name = "Unknown Live Stream";
+                    }
+
+                    // Default EPG
+                    currentChannel.epg = ["Live Regional Stream", "Continuous Broadcast Schedule", "Automated Program Timeline"];
+                } else if (!line.startsWith('#') && currentChannel) {
+                    currentChannel.url = line;
+                    channels.push(currentChannel);
+                    currentChannel = null;
+                }
+            }
+            return channels;
+        }
+
+        // Fetch custom URL with double CORS proxy failover fallback mechanisms
+        async function fetchAndParseM3U(url) {
+            try {
+                appendAdminLog(`Direct Fetch: Dispatching standard HTTP connection request for ${url}`);
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`Direct load HTTP status failed: ${response.status}`);
+                }
+                const text = await response.text();
+                return text;
+            } catch (err) {
+                appendAdminLog(`Direct Fetch Failed (CORS or network). Redirecting through AllOrigins CORS Proxy...`);
+                try {
+                    const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+                    const response = await fetch(proxyUrl);
+                    if (!response.ok) {
+                        throw new Error(`Proxy load HTTP status failed: ${response.status}`);
+                    }
+                    const text = await response.text();
+                    return text;
+                } catch(proxyErr) {
+                    appendAdminLog(`AllOrigins Proxy request failed. Routing to secondary Google Content Proxy...`);
+                    try {
+                        const proxyUrl2 = `https://images1-focus-opensocial.googleusercontent.com/gadgets/proxy?container=focus&refresh=2592000&url=${encodeURIComponent(url)}`;
+                        const response = await fetch(proxyUrl2);
+                        if (!response.ok) {
+                            throw new Error(`Secondary Proxy load HTTP status failed: ${response.status}`);
+                        }
+                        const text = await response.text();
+                        return text;
+                    } catch(proxyErr2) {
+                        appendAdminLog(`CORS bypass proxies exhausted. Direct and proxies both rejected request: ${proxyErr2.message}`);
+                        throw new Error(`All request routes blocked. Please paste your custom EXTM3U code directly into the backup/restore area below!`);
+                    }
+                }
+            }
+        }
+
+        // Save & Sync custom playlist URL inside Administrator Console
         function saveAndSyncM3uLink() {
-            const urlVal = document.getElementById('admin-playlist-input').value;
+            const urlVal = document.getElementById('admin-playlist-input').value.trim();
+            if (!urlVal) {
+                alert("Please build or enter a valid M3U playlist stream source URL.");
+                return;
+            }
             appendAdminLog(`Syncing master IPTV channels lists catalog from M3U Source link: ${urlVal}`);
-            alert(`Parsed link successfully! System loaded 120 live M3U components.`);
+            
+            // Set Loading state
+            const saveBtn = document.querySelector('button[onclick="saveAndSyncM3uLink()"]');
+            const originalBtnText = saveBtn.innerHTML;
+            saveBtn.innerHTML = `<i data-lucide="refresh-cw" class="w-4 h-4 animate-spin mr-2"></i><span>Loading & Parsing M3U...</span>`;
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+            
+            fetchAndParseM3U(urlVal).then(text => {
+                const parsed = parseM3uText(text);
+                if (parsed.length === 0) {
+                    throw new Error("No channels could be parsed from the M3U content. Check file format.");
+                }
+                
+                defaultChannelsList = parsed;
+                setDBValue('pavel_channels_list', defaultChannelsList).then(() => {
+                    localStorage.setItem('pavel_playlist_url', urlVal);
+                    
+                    // Refresh list and category
+                    selectedCategory = "All";
+                    renderCategoryTabs();
+                    renderChannelsList();
+                    
+                    appendAdminLog(`Successfully sync-loaded ${parsed.length} live channels from URL.`);
+                    alert(`Successfully parsed and loaded ${parsed.length} live channels!`);
+                }).catch(dbErr => {
+                    appendAdminLog(`Error saving parsed M3U channels to IndexedDB: ${dbErr.message}`);
+                    alert(`Could not save channels inside IndexedDB: ${dbErr.message}`);
+                });
+            }).catch(err => {
+                appendAdminLog(`Parse M3U URL Error: ${err.message}`);
+                alert(`Could not download or parse M3U source: ${err.message}\n\nTip: You can also copy and paste the EXTM3U code directly into the Backup/Restore Properties area below and click 'Restore Backup'.`);
+            }).finally(() => {
+                saveBtn.innerHTML = originalBtnText;
+                if (typeof lucide !== 'undefined') lucide.createIcons();
+            });
         }
 
         // System verification logs generators
@@ -858,17 +1111,45 @@
         }
 
         function triggerRestoreBackup() {
-            const content = document.getElementById('admin-backup-area').value;
+            const content = document.getElementById('admin-backup-area').value.trim();
             if (!content) {
-                alert("Please click 'Gen Properties' or enter parameters.");
+                alert("Please enter JSON backup or raw EXTM3U content.");
                 return;
             }
-            try {
-                JSON.parse(content);
-                appendAdminLog("Active backup dataset validated and parsed containing 0 payload issues.");
-                alert("Active backup schema successfully restored inside system repositories.");
-            } catch(e) {
-                alert("Restore failed: Malformed JSON properties structure.");
+            if (content.startsWith('#EXTM3U')) {
+                // Parse as M3U content directly
+                const parsed = parseM3uText(content);
+                if (parsed.length === 0) {
+                    alert("Failure: Valid entries not found in the EXTM3U content.");
+                    return;
+                }
+                defaultChannelsList = parsed;
+                setDBValue('pavel_channels_list', defaultChannelsList).then(() => {
+                    localStorage.setItem('pavel_playlist_url', 'pasted_config');
+                    document.getElementById('admin-playlist-input').value = 'pasted_config';
+                    
+                    selectedCategory = "All";
+                    renderCategoryTabs();
+                    renderChannelsList();
+                    
+                    appendAdminLog(`Pasted M3U restore successful. Loaded ${parsed.length} channels.`);
+                    alert(`Pasted raw EXTM3U loaded successfully! ${parsed.length} channels added to Catalog!`);
+                }).catch(dbErr => {
+                    appendAdminLog(`Error saving restored channels to IndexedDB: ${dbErr.message}`);
+                    alert(`Could not save restored channels inside IndexedDB: ${dbErr.message}`);
+                });
+            } else {
+                try {
+                    const parsedJson = JSON.parse(content);
+                    if (parsedJson.active_playlist_url) {
+                        document.getElementById('admin-playlist-input').value = parsedJson.active_playlist_url;
+                        localStorage.setItem('pavel_playlist_url', parsedJson.active_playlist_url);
+                    }
+                    appendAdminLog("Settings JSON backup restored successfully.");
+                    alert("JSON settings restored successfully. Click 'Save & Parse M3U' to download channels.");
+                } catch(e) {
+                    alert("Restore failed: Value is neither a valid JSON block nor does it start with '#EXTM3U'.");
+                }
             }
         }
 
@@ -887,13 +1168,19 @@
         // Handle browser resize events dynamically to reflect responsive device blockage rule instantly
         window.addEventListener('resize', () => {
             const activeSection = document.getElementById('section-admin');
-            if (!activeSection.classList.contains('hidden')) {
+            if (activeSection && !activeSection.classList.contains('hidden')) {
                 triggerDeviceDetectionCheck();
             }
         });
 
-        // Initialize App
-        renderChannelsList();
+        // Initialize App inside async wrapper
+        async function initializeApp() {
+            document.getElementById('admin-playlist-input').value = activePlaylistUrl;
+            await loadStoredChannels();
+            renderCategoryTabs();
+            renderChannelsList();
+        }
+        initializeApp();
     </script>
 </body>
 </html>

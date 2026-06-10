@@ -5,6 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -847,115 +849,249 @@ fun TelemetryView(state: IptvUiState) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsView(
     viewModel: IptvViewModel,
     state: IptvUiState
 ) {
+    var m3uUrl by remember(state.playlistUrl) { mutableStateOf(state.playlistUrl) }
+    var backupJson by remember { mutableStateOf("") }
+    val scrollState = rememberScrollState()
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp),
-        contentAlignment = Alignment.Center
+            .padding(16.dp),
+        contentAlignment = Alignment.TopCenter
     ) {
-        Card(
-            colors = CardDefaults.cardColors(containerColor = DeepBlueSurface),
-            shape = RoundedCornerShape(16.dp),
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .widthIn(max = 500.dp)
-                .border(1.dp, Color(0xFF1E293B), RoundedCornerShape(16.dp))
+                .widthIn(max = 600.dp)
+                .verticalScroll(scrollState)
+                .padding(vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Column(
-                modifier = Modifier.padding(28.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
+            // Section header
+            Text(
+                text = "System Configuration & Access",
+                style = MaterialTheme.typography.titleLarge,
+                color = TextWhite,
+                fontWeight = FontWeight.Bold
+            )
+
+            // Playlist settings Card
+            Card(
+                colors = CardDefaults.cardColors(containerColor = DeepBlueSurface),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, Color(0xFF1E293B), RoundedCornerShape(16.dp))
             ) {
-                // Large styled locker/security key icon
-                Box(
-                    modifier = Modifier
-                        .size(80.dp)
-                        .clip(RoundedCornerShape(40.dp))
-                        .background(Color.Red.copy(alpha = 0.1f)),
-                    contentAlignment = Alignment.Center
+                Column(
+                    modifier = Modifier.padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Security,
-                        contentDescription = "Access Blocked",
-                        tint = Color.Red,
-                        modifier = Modifier.size(44.dp)
+                    Text(
+                        text = "M3U Playlist Source URL",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = AccentCyan,
+                        fontWeight = FontWeight.Bold
                     )
+                    Text(
+                        text = "Enter a live streaming catalog (.m3u/.m3u8 format) URL to sync channels dynamically over-the-air.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextGray
+                    )
+
+                    OutlinedTextField(
+                        value = m3uUrl,
+                        onValueChange = { m3uUrl = it },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("playlist_url_input"),
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(color = TextWhite),
+                        placeholder = { Text("https://example.com/playlist.m3u", color = TextGray) },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = AccentCyan,
+                            unfocusedBorderColor = Color(0xFF334155),
+                            cursorColor = AccentCyan
+                        ),
+                        singleLine = true
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Button(
+                            onClick = {
+                                viewModel.updatePlaylistUrl(m3uUrl)
+                                viewModel.triggerPlaylistRefresh()
+                            },
+                            enabled = !state.isLoading,
+                            colors = ButtonDefaults.buttonColors(containerColor = AccentCyan, contentColor = DeepBlueBg),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("save_playlist_button")
+                        ) {
+                            if (state.isLoading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    color = DeepBlueBg,
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Parsing...", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                            } else {
+                                Text("Save & Parse Streams", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                            }
+                        }
+                    }
+
+                    if (state.lastRefreshTime > 0) {
+                        val date = java.util.Date(state.lastRefreshTime)
+                        val format = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
+                        Text(
+                            text = "Last synchronized: ${format.format(date)}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color(0xFF10B981),
+                            modifier = Modifier.align(Alignment.End)
+                        )
+                    }
                 }
+            }
 
-                Spacer(modifier = Modifier.height(24.dp))
-
-                Text(
-                    text = "Administrative Access Blocked",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = TextWhite,
-                    fontWeight = FontWeight.Bold
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Text(
-                    text = "Admin Panel is available only on Desktop or Laptop.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = AccentCyan,
-                    fontWeight = FontWeight.SemiBold,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                HorizontalDivider(color = Color(0xFF1E293B), thickness = 1.dp)
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Text(
-                    text = "Security Isolation Enforcement",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = TextWhite,
-                    fontWeight = FontWeight.Bold
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                    text = "The Pavel IPTV ecosystem separates consumer playback interfaces from management tools. Platform environments such as Android Mobile, Android TV, Google TV, Fire TV, and iOS apps are restricted from direct administrative functions (such as custom M3U configuration, user profile tables, analytics tracking, and credential back-ups). Please log in to the Desktop Console Web portal to manage channels, playlists, or database configurations.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextGray,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                )
-                
-                Spacer(modifier = Modifier.height(20.dp))
-                
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly
+            // Playback Engine selector Card
+            Card(
+                colors = CardDefaults.cardColors(containerColor = DeepBlueSurface),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, Color(0xFF1E293B), RoundedCornerShape(16.dp))
+            ) {
+                Column(
+                    modifier = Modifier.padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Badge(containerColor = Color(0xFF0F172A), contentColor = AccentCyan, text = "JWT SECURE")
-                    Badge(containerColor = Color(0xFF0F172A), contentColor = AccentCyan, text = "IP RESTRICTED")
-                    Badge(containerColor = Color(0xFF0F172A), contentColor = AccentCyan, text = "MFA LOGGED")
+                    Text(
+                        text = "Primary Playback Engine",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = AccentCyan,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Select the digital streaming decoder. If streams lag, fail loading, or throw hardware errors, toggle options accordingly.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextGray
+                    )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFF0F172A))
+                            .border(1.dp, Color(0xFF1E293B), RoundedCornerShape(8.dp))
+                            .padding(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        PlaybackEngine.values().forEach { engine ->
+                            val isSelected = state.playbackEngine == engine
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (isSelected) AccentCyan else Color.Transparent)
+                                    .clickable { viewModel.setPlaybackEngine(engine) }
+                                    .padding(vertical = 10.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = engine.label,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isSelected) DeepBlueBg else TextWhite
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Backup & Migration Card
+            Card(
+                colors = CardDefaults.cardColors(containerColor = DeepBlueSurface),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, Color(0xFF1E293B), RoundedCornerShape(16.dp))
+            ) {
+                Column(
+                    modifier = Modifier.padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "Database Properties Migration Info",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = AccentCyan,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Migrate settings directly using serialized properties JSON strings below.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextGray
+                    )
+
+                    OutlinedTextField(
+                        value = backupJson,
+                        onValueChange = { backupJson = it },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(110.dp)
+                            .testTag("backup_json_field"),
+                        textStyle = MaterialTheme.typography.bodySmall.copy(color = Color(0xFF34D399), fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
+                        placeholder = { Text("Paste JSON config here...", color = TextGray, style = MaterialTheme.typography.bodySmall) },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = AccentCyan,
+                            unfocusedBorderColor = Color(0xFF334155),
+                            cursorColor = AccentCyan
+                        )
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                backupJson = viewModel.exportSettings()
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentCyan),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, AccentCyan)
+                        ) {
+                            Text("Export JSON Config", fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = {
+                                if (backupJson.isNotBlank()) {
+                                    viewModel.importSettings(backupJson)
+                                }
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = AccentCyan, contentColor = DeepBlueBg)
+                        ) {
+                            Text("Restore Properties", fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun Badge(containerColor: Color, contentColor: Color, text: String) {
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(6.dp))
-            .background(containerColor)
-            .padding(horizontal = 8.dp, vertical = 4.dp)
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelSmall,
-            color = contentColor,
-            fontWeight = FontWeight.Bold
-        )
     }
 }
