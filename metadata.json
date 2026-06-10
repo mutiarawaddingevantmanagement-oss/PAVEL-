@@ -1,0 +1,6 @@
+{
+  "name": "PAVEL IPTV",
+  "description": "Premium High-Speed IPTV playback platform with auto-failover, self-healing stream management, and smart category parsing.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
